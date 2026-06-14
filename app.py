@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from privacy_metrics import compute_l_diversity, check_l_diversity_threshold
 
 st.set_page_config(page_title="k-Anonymity Anonymizer", layout="wide")
 
@@ -50,7 +51,7 @@ if uploaded_file is not None:
             grouped = df_anon[quasi_columns].value_counts()
             min_k = grouped.min()
             
-            st.success(f"✅ Anonymization complete!")
+            st.success("Anonymization complete")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -58,10 +59,62 @@ if uploaded_file is not None:
             with col2:
                 st.metric("Achieved k-anonymity", min_k)
                 if min_k < k_value:
-                    st.warning(f"⚠️ Achieved k ({min_k}) is less than target ({k_value}). Try selecting fewer columns or get more data.")
+                    st.warning(f"Achieved k ({min_k}) is less than target ({k_value}). Try selecting fewer columns or increasing data size.")
             
-            st.subheader("📊 Anonymized Data Preview")
+            # Advanced Privacy Metrics Section
+            st.subheader("Advanced Privacy Analysis")
+            
+            # Ask user if they want l-diversity analysis
+            with st.expander("l-Diversity Analysis (Extended Privacy)"):
+                st.markdown("""
+                **What is l-diversity?**  
+                k-anonymity hides identity but not sensitive information. l-diversity ensures each group has at least `l` distinct values for sensitive attributes.
+                
+                **Example:** If all 50 people in a k-anonymous group have "HIV" as disease, privacy is still violated. l-diversity prevents this.
+                """)
+                
+                # Let user select a sensitive column
+                all_columns = df.columns.tolist()
+                sensitive_column = st.selectbox(
+                    "Select a sensitive column to analyze (e.g., Disease, Salary, Diagnosis)",
+                    ["None"] + all_columns,
+                    help="This column contains the sensitive information you want to protect (e.g., medical conditions, income)"
+                )
+                
+                if sensitive_column != "None" and quasi_columns:
+                    l_diversity_result = compute_l_diversity(df_anon, quasi_columns, sensitive_column)
+                    
+                    if "error" in l_diversity_result:
+                        st.error(l_diversity_result["error"])
+                    else:
+                        st.metric("Minimum l-diversity", l_diversity_result["min_l_diversity"])
+                        st.metric("Average l-diversity", l_diversity_result["avg_l_diversity"])
+                        
+                        # Interpret the result
+                        if l_diversity_result["min_l_diversity"] >= 3:
+                            st.success("Strong l-diversity: Each group has at least 3 distinct sensitive values.")
+                        elif l_diversity_result["min_l_diversity"] >= 2:
+                            st.info("Moderate l-diversity: Some groups have only 2 distinct values. May be acceptable for many use cases.")
+                        else:
+                            st.warning(f"Low l-diversity: {l_diversity_result['groups_below_threshold']} out of {l_diversity_result['total_groups']} groups have only 1 distinct sensitive value. Attribute disclosure possible.")
+                        
+                        # Show interpretation
+                        st.caption(l_diversity_result["interpretation"])
+                        
+                        # Optional: Show detailed breakdown
+                        with st.expander("View detailed breakdown by group"):
+                            for group_key, details in list(l_diversity_result["details"].items())[:5]:  # Show first 5 groups
+                                st.markdown(f"**Group {group_key}**")
+                                st.write(f"- Size: {details['size']} records")
+                                st.write(f"- Diversity: {details['diversity']} unique values")
+                                st.write(f"- Distinct values: {', '.join(str(v) for v in details['unique_values'][:3])}...")
+                                st.divider()
+                elif sensitive_column != "None" and not quasi_columns:
+                    st.info("Select quasi-identifier columns first to enable l-diversity analysis.")
+            
+            st.subheader("Anonymized Data Preview")
             st.dataframe(df_anon.head(10))
+     
             
             # Download button
             csv = df_anon.to_csv(index=False).encode('utf-8')
